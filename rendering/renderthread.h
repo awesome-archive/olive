@@ -29,7 +29,7 @@
 #include <QOpenGLFramebufferObject>
 #include <QOpenGLShaderProgram>
 
-#include "project/sequence.h"
+#include "rendering/renderfunctions.h"
 #include "project/effect.h"
 
 // copied from source code to OCIODisplay
@@ -111,6 +111,8 @@ private:
   QOpenGLContext* ctx;
   QOpenGLShaderProgram* blend_mode_program;
   QOpenGLShaderProgram* premultiply_program;
+
+  ComposeSequenceParams params;
 
   float ocio_lut_data[NUM_3D_ENTRIES];
   GLuint ocio_lut_texture;

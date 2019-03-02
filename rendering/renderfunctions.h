@@ -28,7 +28,7 @@
 #include "project/sequence.h"
 #include "project/effect.h"
 
-#include "panels/viewer.h"
+class Viewer;
 
 /**
  * @brief The ComposeSequenceParams struct

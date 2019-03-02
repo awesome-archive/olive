@@ -30,9 +30,6 @@
 namespace OCIO = OCIO_NAMESPACE;
 #endif
 
-#include "rendering/renderfunctions.h"
-#include "project/sequence.h"
-
 RenderThread::RenderThread()
 {
   gizmos = nullptr;
@@ -136,7 +133,6 @@ void RenderThread::set_up_ocio()
 
 void RenderThread::paint() {
   // set up compose_sequence() parameters
-  ComposeSequenceParams params;
   params.viewer = nullptr;
   params.ctx = ctx;
   params.seq = seq;
@@ -169,7 +165,6 @@ void RenderThread::paint() {
 
   glEnable(GL_TEXTURE_2D);
   glEnable(GL_BLEND);
-  glEnable(GL_DEPTH);
 
   gizmos = nullptr;
 
@@ -216,7 +211,6 @@ void RenderThread::paint() {
     pixel_buffer = nullptr;
   }
 
-  glDisable(GL_DEPTH);
   glDisable(GL_BLEND);
   glDisable(GL_TEXTURE_2D);
 
