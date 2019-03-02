@@ -115,7 +115,6 @@ public:
   AVRational time_base();
 
   void reset_audio();
-  void reset();
   void refresh();
 
   long length();
@@ -151,8 +150,8 @@ public:
   QMutex cache_lock;
 
   // video playback variables
-  QOpenGLFramebufferObject** fbo;
-  QOpenGLTexture* texture;
+  QVector<QOpenGLFramebufferObject*> fbo;
+  QOpenGLTexture texture;
   long texture_frame;
 
 private:

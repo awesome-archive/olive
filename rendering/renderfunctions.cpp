@@ -169,7 +169,7 @@ GLuint compose_sequence(ComposeSequenceParams &params) {
       playhead = rescale_frame_number(playhead, params.nests.at(i)->sequence->frame_rate, s->frame_rate);
     }
 
-    if (params.video && params.nests.last()->fbo != nullptr) {
+    if (params.video && !params.nests.last()->fbo.isEmpty()) {
       params.nests.last()->fbo[0]->bind();
       glClear(GL_COLOR_BUFFER_BIT);
       final_fbo = params.nests.last()->fbo[0]->handle();
@@ -274,7 +274,7 @@ GLuint compose_sequence(ComposeSequenceParams &params) {
     glPushMatrix();
     glLoadIdentity();
 
-    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+    params.ctx->functions()->glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 
     int half_width = s->width/2;
     int half_height = s->height/2;
@@ -318,7 +318,7 @@ GLuint compose_sequence(ComposeSequenceParams &params) {
             params.texture_failed = true;
           } else {
             // retrieve ID from c->texture
-            textureID = c->texture->textureId();
+            textureID = c->texture.textureId();
           }
 
           if (textureID == 0) {
@@ -327,14 +327,12 @@ GLuint compose_sequence(ComposeSequenceParams &params) {
         }
 
         // prepare framebuffers for backend drawing operations
-        if (c->fbo == nullptr) {
+        if (c->fbo.isEmpty()) {
           // create 3 fbos for nested sequences, 2 for most clips
           int fbo_count = (c->media() != nullptr && c->media()->get_type() == MEDIA_TYPE_SEQUENCE) ? 3 : 2;
 
-          c->fbo = new QOpenGLFramebufferObject* [size_t(fbo_count)];
-
           for (int j=0;j<fbo_count;j++) {
-            c->fbo[j] = new QOpenGLFramebufferObject(video_width, video_height);
+            c->fbo.append(new QOpenGLFramebufferObject(video_width, video_height));
           }
         }
 
@@ -658,7 +656,7 @@ GLuint compose_sequence(ComposeSequenceParams &params) {
 
 //  qDebug() << "compose sequence took" << QDateTime::currentMSecsSinceEpoch() - time;
 
-  if (!params.nests.isEmpty() && params.nests.last()->fbo != nullptr) {
+  if (!params.nests.isEmpty() && !params.nests.last()->fbo.isEmpty()) {
     // returns nested clip's texture
     return params.nests.last()->fbo[0]->texture();
   }

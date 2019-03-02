@@ -35,10 +35,6 @@ namespace OCIO = OCIO_NAMESPACE;
 
 RenderThread::RenderThread()
 {
-  front_buffer1 = 0;
-  front_buffer2 = 0;
-  front_texture1 = 0;
-  front_texture2 = 0;
   gizmos = nullptr;
   share_ctx = nullptr;
   ctx = nullptr;
@@ -74,39 +70,22 @@ void RenderThread::run() {
       if (ctx != nullptr) {
         ctx->makeCurrent(&surface);
 
+        // cache texture size
+        tex_width = seq->width;
+        tex_height = seq->height;
+
         // gen fbo
-        if (front_buffer1 == 0) {
-          // delete any existing framebuffers
-          delete_fbo();
-
-          // create framebuffers
-          ctx->functions()->glGenFramebuffers(1, &front_buffer1);
-          ctx->functions()->glGenFramebuffers(1, &front_buffer2);
-          ctx->functions()->glGenFramebuffers(1, &back_buffer_1);
-          ctx->functions()->glGenFramebuffers(1, &back_buffer_2);
+        if (!front_buffer_1.is_created()) {
+          front_buffer_1.create(ctx, tex_width, tex_height);
         }
-
-        // gen texture
-        if (front_texture1 == 0 || tex_width != seq->width || tex_height != seq->height) {
-          // cache texture size
-          tex_width = seq->width;
-          tex_height = seq->height;
-
-          // delete any existing textures
-          delete_texture();
-
-          // create texture
-          glGenTextures(1, &front_texture1);
-          glGenTextures(1, &front_texture2);
-          glGenTextures(1, &back_texture_1);
-          glGenTextures(1, &back_texture_2);
-
-          GLuint textures[4] = { front_texture1, front_texture2, back_texture_1, back_texture_2 };
-          GLuint fbos[4] = { front_buffer1, front_buffer2, back_buffer_1, back_buffer_2 };
-
-          for (int i=0;i<4;i++) {
-            allocate_texture(textures[i], fbos[i]);
-          }
+        if (!front_buffer_2.is_created()) {
+          front_buffer_2.create(ctx, tex_width, tex_height);
+        }
+        if (!back_buffer_1.is_created()) {
+          back_buffer_1.create(ctx, tex_width, tex_height);
+        }
+        if (!back_buffer_2.is_created()) {
+          back_buffer_2.create(ctx, tex_width, tex_height);
         }
 
         if (blend_mode_program == nullptr) {
@@ -145,39 +124,10 @@ QMutex *RenderThread::get_texture_mutex()
   return front_buffer_switcher ? &front_mutex2 : &front_mutex1;
 }
 
-const GLuint &RenderThread::get_texture()
+GLuint RenderThread::get_texture()
 {
   // return the opposite texture to the texture being drawn to by the renderer
-  return front_buffer_switcher ? front_texture2 : front_texture1;
-}
-
-void RenderThread::allocate_texture(GLuint tex, GLuint fbo)
-{
-  // bind framebuffer for attaching
-  ctx->functions()->glBindFramebuffer(GL_DRAW_FRAMEBUFFER, fbo);
-
-  // bind texture
-  glBindTexture(GL_TEXTURE_2D, tex);
-
-  // allocate storage for texture
-  glTexImage2D(
-        GL_TEXTURE_2D, 0, GL_RGBA, seq->width, seq->height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr
-        );
-
-  // set texture filtering to bilinear
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-
-  // attach texture to framebuffer
-  ctx->functions()->glFramebufferTexture2D(
-        GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0
-        );
-
-  // release texture
-  glBindTexture(GL_TEXTURE_2D, 0);
-
-  // release framebuffer
-  ctx->functions()->glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+  return front_buffer_switcher ? front_buffer_2.texture() : front_buffer_1.texture();
 }
 
 void RenderThread::set_up_ocio()
@@ -197,12 +147,12 @@ void RenderThread::paint() {
   params.playback_speed = 1;
   params.blend_mode_program = blend_mode_program;
   params.premultiply_program = premultiply_program;
-  params.backend_buffer1 = back_buffer_1;
-  params.backend_buffer2 = back_buffer_2;
-  params.backend_attachment1 = back_texture_1;
-  params.backend_attachment2 = back_texture_2;
-  params.main_buffer = front_buffer_switcher ? front_buffer1 : front_buffer2;
-  params.main_attachment = front_buffer_switcher ? front_texture1 : front_texture2;
+  params.backend_buffer1 = back_buffer_1.buffer();
+  params.backend_buffer2 = back_buffer_2.buffer();
+  params.backend_attachment1 = back_buffer_1.texture();
+  params.backend_attachment2 = back_buffer_2.texture();
+  params.main_buffer = front_buffer_switcher ? front_buffer_1.buffer() : front_buffer_2.buffer();
+  params.main_attachment = front_buffer_switcher ? front_buffer_1.texture() : front_buffer_2.texture();
 
   QMutex& active_mutex = front_buffer_switcher ? front_mutex1 : front_mutex2;
   active_mutex.lock();
@@ -284,7 +234,11 @@ void RenderThread::start_render(QOpenGLContext *share, SequencePtr s, const QStr
 
   if (share != nullptr && (ctx == nullptr || ctx->shareContext() != share_ctx)) {
     share_ctx = share;
+
+    // clean any previous context
     delete_ctx();
+
+    // create new context
     ctx = new QOpenGLContext();
     ctx->setFormat(share_ctx->format());
     ctx->setShareContext(share_ctx);
@@ -311,44 +265,98 @@ void RenderThread::cancel() {
   wait();
 }
 
-void RenderThread::delete_texture() {
-  if (front_texture1 > 0) {
-    GLuint tex[4] = {front_texture1, front_texture2, back_texture_1, back_texture_2};
-    glDeleteTextures(3, tex);
-  }
-  front_texture1 = 0;
-  front_texture2 = 0;
-  back_texture_1 = 0;
-  back_texture_2 = 0;
-}
-
-void RenderThread::delete_fbo() {
-  if (front_buffer1 > 0) {
-    GLuint fbos[4] = {front_buffer1, front_buffer2, back_buffer_1, back_buffer_2};
-    ctx->functions()->glDeleteFramebuffers(3, fbos);
-  }
-  front_buffer1 = 0;
-  front_buffer2 = 0;
-  back_buffer_1 = 0;
-  back_buffer_2 = 0;
+void RenderThread::delete_buffers() {
+  front_buffer_1.destroy();
+  front_buffer_2.destroy();
+  back_buffer_1.destroy();
+  back_buffer_2.destroy();
 }
 
 void RenderThread::delete_shader_program() {
-  if (blend_mode_program != nullptr) {
-    delete blend_mode_program;
-    delete premultiply_program;
-  }
+  delete blend_mode_program;
   blend_mode_program = nullptr;
+
+  delete premultiply_program;
   premultiply_program = nullptr;
 }
 
 void RenderThread::delete_ctx() {
-  if (ctx != nullptr) {
-    delete_shader_program();
-    delete_texture();
-    delete_fbo();
-    ctx->doneCurrent();
-    delete ctx;
-  }
+  delete_shader_program();
+  delete_buffers();
+
+  delete ctx;
   ctx = nullptr;
+}
+
+GLFboWrapper::GLFboWrapper() :
+  ctx_(nullptr)
+{
+  buffer_ = 0;
+  texture_ = 0;
+}
+
+GLFboWrapper::~GLFboWrapper() {
+  destroy();
+}
+
+bool GLFboWrapper::is_created()
+{
+  return ctx_ != nullptr;
+}
+
+void GLFboWrapper::create(QOpenGLContext* ctx, int width, int height) {
+  destroy();
+
+  ctx_ = ctx;
+
+  // generate framebuffer
+  ctx_->functions()->glGenFramebuffers(1, &buffer_);
+
+  // generate texture attachment
+  ctx_->functions()->glGenTextures(1, &texture_);
+
+  // bind framebuffer to attach texture
+  ctx_->functions()->glBindFramebuffer(GL_DRAW_FRAMEBUFFER, buffer_);
+
+  // bind texture
+  ctx_->functions()->glBindTexture(GL_TEXTURE_2D, texture_);
+
+  // set texture filtering to bilinear
+  ctx_->functions()->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+  ctx_->functions()->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+
+  // allocate texture storage
+  ctx_->functions()->glTexImage2D(
+        GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr
+        );
+
+  // attach texture to framebuffer
+  ctx_->functions()->glFramebufferTexture2D(
+        GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture_, 0
+        );
+
+  // release texture
+  ctx_->functions()->glBindTexture(GL_TEXTURE_2D, 0);
+
+  // release framebuffer
+  ctx_->functions()->glBindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+}
+
+void GLFboWrapper::destroy() {
+  if (ctx_ != nullptr) {
+    ctx_->functions()->glDeleteTextures(1, &texture_);
+    ctx_->functions()->glDeleteFramebuffers(1, &buffer_);
+  }
+
+  ctx_ = nullptr;
+}
+
+const GLuint &GLFboWrapper::buffer()
+{
+  return buffer_;
+}
+
+const GLuint &GLFboWrapper::texture()
+{
+  return texture_;
 }

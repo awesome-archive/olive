@@ -1029,8 +1029,6 @@ void Cacher::CloseWorker() {
     avformat_close_input(&formatCtx);
   }
 
-  clip->reset();
-
   qInfo() << "Clip closed on track" << clip->track();
 }
 

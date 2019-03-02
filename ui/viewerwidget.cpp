@@ -549,6 +549,11 @@ void ViewerWidget::paintGL() {
     draw_waveform_func();
   } else {
     const GLuint tex = renderer->get_texture();
+
+    if (tex == 0) {
+      return;
+    }
+
     QMutex* tex_lock = renderer->get_texture_mutex();
 
     tex_lock->lock();

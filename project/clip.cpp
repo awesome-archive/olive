@@ -40,6 +40,7 @@ const int kRGBAComponentCount = 4;
 
 Clip::Clip(SequencePtr s) :
   sequence(s),
+  texture(QOpenGLTexture::Target2D),
   cacher(this)
 {
   enabled_ = true;
@@ -56,10 +57,7 @@ Clip::Clip(SequencePtr s) :
   closing_transition = nullptr;
   undeletable = false;
   replaced = false;
-  fbo = nullptr;
   open_ = false;
-
-  reset();
 }
 
 ClipPtr Clip::copy(SequencePtr s) {
@@ -186,10 +184,6 @@ void Clip::move(ComboAction* ca, long iin, long iout, long iclip_in, int itrack,
                                           0));
     }
   }
-}
-
-void Clip::reset() {
-  texture = nullptr;
 }
 
 void Clip::reset_audio() {
@@ -483,8 +477,7 @@ void Clip::Close(bool wait) {
     }
 
     // destroy opengl texture in main thread
-    delete texture;
-    texture = nullptr;
+    texture.destroy();
 
     // close all effects
     for (int i=0;i<effects.size();i++) {
@@ -494,18 +487,10 @@ void Clip::Close(bool wait) {
     }
 
     // delete framebuffers
-    if (fbo != nullptr) {
-      // delete 3 fbos for nested sequences, 2 for most clips
-      int fbo_count = (media() != nullptr && media()->get_type() == MEDIA_TYPE_SEQUENCE) ? 3 : 2;
-
-      for (int j=0;j<fbo_count;j++) {
-        delete fbo[j];
-      }
-
-      delete [] fbo;
-
-      fbo = nullptr;
+    for (int i=0;i<fbo.size();i++) {
+      delete fbo.at(i);
     }
+    fbo.clear();
 
     if (UsesCacher()) {
       cacher.Close(wait);
@@ -544,18 +529,16 @@ bool Clip::Retrieve()
     if (frame != nullptr) {
 
       // check if the opengl texture exists yet, create it if not
-      if (texture == nullptr) {
-        texture = new QOpenGLTexture(QOpenGLTexture::Target2D);
-
+      if (!texture.isCreated()) {
         // the raw frame size may differ from the one we're using (e.g. a lower resolution proxy), so we make sure
         // the texture is using the correct dimensions, but then treat it as if it's the original resolution in the
         // composition
-        texture->setSize(cacher.media_width(), cacher.media_height());
+        texture.setSize(cacher.media_width(), cacher.media_height());
 
-        texture->setFormat(QOpenGLTexture::RGBA8_UNorm);
-        texture->setMipLevels(texture->maximumMipLevels());
-        texture->setMinMagFilters(QOpenGLTexture::Linear, QOpenGLTexture::Linear);
-        texture->allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
+        texture.setFormat(QOpenGLTexture::RGBA8_UNorm);
+        texture.setMipLevels(texture.maximumMipLevels());
+        texture.setMinMagFilters(QOpenGLTexture::Linear, QOpenGLTexture::Linear);
+        texture.allocateStorage(QOpenGLTexture::RGBA, QOpenGLTexture::UInt8);
       }
 
       glPixelStorei(GL_UNPACK_ROW_LENGTH, frame->linesize[0]/kRGBAComponentCount);
@@ -587,7 +570,7 @@ bool Clip::Retrieve()
         }
       }
 
-      texture->setData(QOpenGLTexture::RGBA,
+      texture.setData(QOpenGLTexture::RGBA,
                           QOpenGLTexture::UInt8,
                           const_cast<const uint8_t*>(using_db_1 ? data_buffer_1 : data_buffer_2));
 
