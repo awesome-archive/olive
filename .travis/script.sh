@@ -1,72 +1,76 @@
 #!/bin/bash
 
+# linuxdeployqt uses this for naming the file
+export VERSION=$(git rev-parse --short=8 HEAD)
+
 if [[ "$TRAVIS_OS_NAME" == "osx" ]]; then
 
-	# generate translation files
-	lrelease olive.pro
+    # Generate Makefile
+    cmake . -DCMAKE_BUILD_TYPE=RelWithDebInfo
 
-	# generate Makefile
-	qmake CONFIG+=release PREFIX=/usr
+    # Make
+    make -j$(sysctl -n hw.ncpu)
 
-	# run Makefile
-	make -j$(sysctl -n hw.ncpu)
+    # Handle compile failure
+    if [ "$?" != "0" ]
+    then
+        exit 1
+    fi
 
-	# move Qt deps into bundle
-	macdeployqt Olive.app
+    BUNDLE_NAME=Olive.app
 
-	# fix other deps that macdeployqt missed
-	wget -c -nv https://github.com/arl/macdeployqtfix/raw/master/macdeployqtfix.py
-	python2 macdeployqtfix.py Olive.app/Contents/MacOS/Olive /usr/local/Cellar/qt5/5.*/
+    # Move bundle to working directory
+    mv app/$BUNDLE_NAME .
 
-	# move translations into bundle
-	mkdir Olive.app/Contents/Translations
-	mv ts/*.qm Olive.app/Contents/Translations
+    # Move Qt deps into bundle
+    macdeployqt $BUNDLE_NAME
 
-	# move external effects into bundle
-	mkdir Olive.app/Contents/Effects
-	cp effects/* Olive.app/Contents/Effects
+    # Fix other deps that macdeployqt missed
+    wget -c -nv https://github.com/arl/macdeployqtfix/raw/master/macdeployqtfix.py
+    python2 macdeployqtfix.py $BUNDLE_NAME/Contents/MacOS/Olive /usr/local/Cellar/qt5/5.*/
 
-	# distribute in zip
-	zip -r Olive-$(git rev-parse --short HEAD)-macOS.zip Olive.app
+    # Fix deps on crash handler
+    python2 macdeployqtfix.py $BUNDLE_NAME/Contents/MacOS/olive-crashhandler /usr/local/Cellar/qt5/5.*/
+
+    # Fix OpenEXR libs that seem to be missed by both macdeployqt _and_ macdeployqtfix
+    cd $BUNDLE_NAME/Contents/Frameworks
+    exrlib=(libImath-*.dylib libHalf-*.dylib libIexMath-*.dylib libIex-*.dylib libIlmThread-*.dylib)
+
+    for a in ${exrlib[@]}; do
+        for b in ${exrlib[@]}; do
+            install_name_tool -change @rpath/$b @executable_path/../Frameworks/$b $a
+        done
+    done
+
+    cd ../../..
+
+    # Distribute in zip
+    zip -r Olive-$VERSION-macOS.zip $BUNDLE_NAME
 
 elif [[ "$TRAVIS_OS_NAME" == "linux" ]]; then
 
-	# generate translation files
-	lrelease olive.pro
+    # Generate Makefile
+    cmake . -DCMAKE_BUILD_TYPE=RelWithDebInfo
 
-	# generate Makefile
-	if [ "$ARCH" == "i386" ]; then
-		# use extra compiler flags to force 32-bit build
-		qmake CONFIG+=release "QMAKE_CFLAGS+=-m32" "QMAKE_CXXFLAGS+=-m32" "QMAKE_LFLAGS+=-m32" PREFIX=/usr -spec linux-g++-32
-	else
-		qmake CONFIG+=release PREFIX=/usr
-	fi
+    # Make
+    make -j$(nproc)
 
-	# run Makefile
-	make -j$(nproc)
+    # Handle compile failure
+    if [ "$?" != "0" ]
+    then
+        exit 1
+    fi
 
-	# use `make install` on `appdir` to place files in the correct place
-	make INSTALL_ROOT=appdir -j$(nproc) install ; find appdir/
+    # Use `make install` on `appdir` to place files in the correct place
+    make DESTDIR=appdir install
 
-	# download linuxdeployqt
-	wget -c -nv "https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage"
-	chmod a+x linuxdeployqt-continuous-x86_64.AppImage
+    # Download linuxdeployqt
+    wget -c -nv "https://github.com/probonopd/linuxdeployqt/releases/download/continuous/linuxdeployqt-continuous-x86_64.AppImage"
+    chmod a+x linuxdeployqt-continuous-x86_64.AppImage
 
-	unset QTDIR; unset QT_PLUGIN_PATH ; unset LD_LIBRARY_PATH
-	
-	# linuxdeployqt uses this for naming the file
-	export VERSION=$(git rev-parse --short HEAD)
+    unset QTDIR; unset QT_PLUGIN_PATH ; unset LD_LIBRARY_PATH
 
-	# use linuxdeployqt to set up dependencies
-	./linuxdeployqt-continuous-x86_64.AppImage appdir/usr/share/applications/*.desktop -extra-plugins=imageformats/libqsvg.so -appimage
-
-	# 64-bit linuxdeployqt can only generate a 64-bit AppImage
-	# to generate a 32-bit one, we need to download and run 32-bit AppImageTool
-	if [ "$ARCH" == "i386" ]; then
-		rm Olive*.AppImage
-		wget -c -nv "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-i686.AppImage"
-		chmod a+x appimagetool-i686.AppImage
-		./appimagetool-i686.AppImage "appdir" -n -g
-	fi
+    # Use linuxdeployqt to set up dependencies
+    ./linuxdeployqt-continuous-x86_64.AppImage appdir/usr/local/share/applications/*.desktop -extra-plugins=imageformats/libqsvg.so -appimage
 
 fi

@@ -4,6 +4,13 @@ Makefile
 effects/frei0r
 ts/*.qm
 docs
+history
+build/
+.DS_Store
+
+.vscode
+.vs
+CmakeSettings.json
 
 #
 # Qt ignores taken from https://github.com/github/gitignore
